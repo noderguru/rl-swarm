@@ -7,3 +7,4 @@ tensorboard
 transformers>=4.46.0
 trl
 web3
+vllm==0.8.2

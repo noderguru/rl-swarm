@@ -34,7 +34,6 @@ IDENTITY_PATH=${IDENTITY_PATH:-$DEFAULT_IDENTITY_PATH}
 SMALL_SWARM_CONTRACT="0x69C6e1D608ec64885E7b185d39b04B491a71768C"
 BIG_SWARM_CONTRACT="0x6947c6E196a48B77eFa9331EC1E3e45f3Ee5Fd58"
 
-# НАЧАЛО ИЗМЕНЕНИЙ: Функция для проверки и установки пакетов
 install_packages() {
     local os_type=$1
     shift
@@ -76,7 +75,6 @@ install_packages() {
         echo -e "${CYAN}${BOLD}[✓] ${packages[*]} already installed.${NC}"
     fi
 }
-# КОНЕЦ ИЗМЕНЕНИЙ
 
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
   if command -v apt &>/dev/null; then
@@ -317,7 +315,6 @@ trap cleanup INT
 
 sleep 2
 
-# НАЧАЛО ИЗМЕНЕНИЙ: Проверка существования node_modules
 if [ -f "modal-login/temp-data/userData.json" ]; then
     cd modal-login
 
@@ -327,7 +324,6 @@ if [ -f "modal-login/temp-data/userData.json" ]; then
     else
         echo -e "\n${CYAN}${BOLD}[✓] npm dependencies already installed.${NC}"
     fi
-# КОНЕЦ ИЗМЕНЕНИЙ
 
     echo -e "\n${CYAN}${BOLD}[✓] Starting the development server...${NC}"
     if ! command -v ss &>/dev/null; then
@@ -382,7 +378,6 @@ if [ -f "modal-login/temp-data/userData.json" ]; then
 else
     cd modal-login
 
-    # НАЧАЛО ИЗМЕНЕНИЙ: Проверка node_modules
     if [ ! -d "node_modules" ]; then
         echo -e "\n${CYAN}${BOLD}[✓] Installing dependencies with npm...${NC}"
         npm install --legacy-peer-deps

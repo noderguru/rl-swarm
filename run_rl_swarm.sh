@@ -34,29 +34,76 @@ IDENTITY_PATH=${IDENTITY_PATH:-$DEFAULT_IDENTITY_PATH}
 SMALL_SWARM_CONTRACT="0x69C6e1D608ec64885E7b185d39b04B491a71768C"
 BIG_SWARM_CONTRACT="0x6947c6E196a48B77eFa9331EC1E3e45f3Ee5Fd58"
 
+# НАЧАЛО ИЗМЕНЕНИЙ: Функция для проверки и установки пакетов
+install_packages() {
+    local os_type=$1
+    shift
+    local packages=("$@")
+    local to_install=()
+
+    case $os_type in
+        apt)
+            for pkg in "${packages[@]}"; do
+                if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+                    to_install+=("$pkg")
+                fi
+            done
+            ;;
+        yum)
+            for pkg in "${packages[@]}"; do
+                if ! rpm -q "$pkg" >/dev/null 2>&1; then
+                    to_install+=("$pkg")
+                fi
+            done
+            ;;
+        pacman)
+            for pkg in "${packages[@]}"; do
+                if ! pacman -Q "$pkg" >/dev/null 2>&1; then
+                    to_install+=("$pkg")
+                fi
+            done
+            ;;
+    esac
+
+    if [ ${#to_install[@]} -gt 0 ]; then
+        echo -e "${CYAN}${BOLD}[✓] Installing ${to_install[*]}...${NC}"
+        case $os_type in
+            apt) sudo apt install -y "${to_install[@]}" >/dev/null 2>&1 ;;
+            yum) sudo yum install -y "${to_install[@]}" >/dev/null 2>&1 ;;
+            pacman) sudo pacman -Sy --noconfirm "${to_install[@]}" >/dev/null 2>&1 ;;
+        esac
+    else
+        echo -e "${CYAN}${BOLD}[✓] ${packages[*]} already installed.${NC}"
+    fi
+}
+# КОНЕЦ ИЗМЕНЕНИЙ
+
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
   if command -v apt &>/dev/null; then
-    echo -e "${CYAN}${BOLD}[✓] Debian/Ubuntu detected. Installing build-essential, gcc, g++...${NC}"
-    sudo apt update > /dev/null 2>&1
-    sudo apt install -y build-essential gcc g++ > /dev/null 2>&1
+    echo -e "${CYAN}${BOLD}[✓] Debian/Ubuntu detected.${NC}"
+    sudo apt update >/dev/null 2>&1
+    install_packages "apt" "build-essential" "gcc" "g++"
 
   elif command -v yum &>/dev/null; then
-    echo -e "${CYAN}${BOLD}[✓] RHEL/CentOS detected. Installing Development Tools...${NC}"
-    sudo yum groupinstall -y "Development Tools" > /dev/null 2>&1
-    sudo yum install -y gcc gcc-c++ > /dev/null 2>&1
+    echo -e "${CYAN}${BOLD}[✓] RHEL/CentOS detected.${NC}"
+    install_packages "yum" "gcc" "gcc-c++"
 
   elif command -v pacman &>/dev/null; then
-    echo -e "${CYAN}${BOLD}[✓] Arch Linux detected. Installing base-devel...${NC}"
-    sudo pacman -Sy --noconfirm base-devel gcc > /dev/null 2>&1
+    echo -e "${CYAN}${BOLD}[✓] Arch Linux detected.${NC}"
+    install_packages "pacman" "base-devel" "gcc"
 
   else
-    echo -e "${RED}${BOLD}[✗] Linux detected but unsupported package manager.${NC}"
+    echo -e "${RED}${BOLD}[✗] Unsupported Linux package manager.${NC}"
     exit 1
   fi
 
 elif [[ "$OSTYPE" == "darwin"* ]]; then
-  echo -e "${CYAN}${BOLD}[✓] macOS detected. Installing Xcode Command Line Tools...${NC}"
-  xcode-select --install > /dev/null 2>&1
+  echo -e "${CYAN}${BOLD}[✓] macOS detected.${NC}"
+  if ! xcode-select -p >/dev/null 2>&1; then
+    xcode-select --install >/dev/null 2>&1
+  else
+    echo -e "${CYAN}${BOLD}[✓] Xcode tools already installed.${NC}"
+  fi
 
 else
   echo -e "${RED}${BOLD}[✗] Unsupported OS: $OSTYPE${NC}"
@@ -270,12 +317,18 @@ trap cleanup INT
 
 sleep 2
 
+# НАЧАЛО ИЗМЕНЕНИЙ: Проверка существования node_modules
 if [ -f "modal-login/temp-data/userData.json" ]; then
     cd modal-login
 
-    echo -e "\n${CYAN}${BOLD}[✓] Installing dependencies with npm. This may take a few minutes, depending on your internet speed...${NC}"
-    npm install --legacy-peer-deps
-    
+    if [ ! -d "node_modules" ]; then
+        echo -e "\n${CYAN}${BOLD}[✓] Installing dependencies with npm...${NC}"
+        npm install --legacy-peer-deps
+    else
+        echo -e "\n${CYAN}${BOLD}[✓] npm dependencies already installed.${NC}"
+    fi
+# КОНЕЦ ИЗМЕНЕНИЙ
+
     echo -e "\n${CYAN}${BOLD}[✓] Starting the development server...${NC}"
     if ! command -v ss &>/dev/null; then
       echo -e "${YELLOW}[!] 'ss' not found. Attempting to install 'iproute2'...${NC}"
@@ -329,8 +382,14 @@ if [ -f "modal-login/temp-data/userData.json" ]; then
 else
     cd modal-login
 
-    echo -e "\n${CYAN}${BOLD}[✓] Installing dependencies with npm. This may take a few minutes, depending on your internet speed...${NC}"
-    npm install --legacy-peer-deps
+    # НАЧАЛО ИЗМЕНЕНИЙ: Проверка node_modules
+    if [ ! -d "node_modules" ]; then
+        echo -e "\n${CYAN}${BOLD}[✓] Installing dependencies with npm...${NC}"
+        npm install --legacy-peer-deps
+    else
+        echo -e "\n${CYAN}${BOLD}[✓] npm dependencies already installed.${NC}"
+    fi
+    # КОНЕЦ ИЗМЕНЕНИЙ
     
     echo -e "\n${CYAN}${BOLD}[✓] Starting the development server...${NC}"
     if ! command -v ss &>/dev/null; then
@@ -692,24 +751,49 @@ else
 
     ENV_FILE="$ROOT"/modal-login/.env
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS version
         sed -i '' "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
     else
-        # Linux version
         sed -i "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
     fi
 fi
 
-echo -e "${CYAN}${BOLD}[✓] Setting up Python virtual environment...${NC}"
-python3 -m venv .venv && . .venv/bin/activate && \
-echo -e "${GREEN}${BOLD}[✓] Python virtual environment set up successfully.${NC}" || \
-echo -e "${RED}${BOLD}[✗] Failed to set up virtual environment.${NC}"
+# НАЧАЛО ИЗМЕНЕНИЙ: Проверка виртуального окружения
+echo -e "${CYAN}${BOLD}[✓] Checking Python virtual environment...${NC}"
+if [ ! -d ".venv" ]; then
+    echo -e "${CYAN}${BOLD}[✓] Creating Python virtual environment...${NC}"
+    python3 -m venv .venv
+else
+    echo -e "${CYAN}${BOLD}[✓] Virtual environment already exists.${NC}"
+fi
+
+source .venv/bin/activate
+
+# Проверка установленных зависимостей
+check_python_deps() {
+    local req_file=$1
+    local marker_file=".venv/${req_file}.installed"
+    
+    if [ ! -f "$marker_file" ]; then
+        echo -e "${CYAN}${BOLD}[✓] Installing ${req_file}...${NC}"
+        pip install -r "$ROOT"/"$req_file"
+        [ "$req_file" = "requirements-gpu.txt" ] && pip install flash-attn --no-build-isolation
+        touch "$marker_file"
+    else
+        echo -e "${CYAN}${BOLD}[✓] ${req_file} already installed.${NC}"
+    fi
+}
+
+if [ "$CPU_ONLY" = "false" ]; then
+    check_python_deps "requirements-gpu.txt"
+else
+    check_python_deps "requirements-cpu.txt"
+fi
+# КОНЕЦ ИЗМЕНЕНИЙ
 
 if [ -z "$CONFIG_PATH" ]; then
     if command -v nvidia-smi &> /dev/null || [ -d "/proc/driver/nvidia" ]; then
         echo -e "${GREEN}${BOLD}[✓] GPU detected${NC}"
         
-        # Here was the problematic break statement - removing it and fixing logic
         case "$PARAM_B" in
             32 | 72) 
                 CONFIG_PATH="$ROOT/hivemind_exp/configs/gpu/grpo-qwen-2.5-${PARAM_B}b-bnb-4bit-deepseek-r1.yaml"
@@ -729,18 +813,13 @@ if [ -z "$CONFIG_PATH" ]; then
             GAME="gsm8k"
         fi
         echo -e "${CYAN}${BOLD}[✓] Config file : ${BOLD}$CONFIG_PATH\n${NC}"
-        echo -e "${CYAN}${BOLD}[✓] Installing GPU-specific requirements, may take few mins depending on your internet speed...${NC}"
-        pip install -r "$ROOT"/requirements-gpu.txt
-        pip install flash-attn --no-build-isolation
     else
         echo -e "${YELLOW}${BOLD}[✓] No GPU detected, using CPU configuration${NC}"
-        pip install -r "$ROOT"/requirements-cpu.txt
         CONFIG_PATH="$ROOT/hivemind_exp/configs/mac/grpo-qwen-2.5-0.5b-deepseek-r1.yaml"
         GAME="gsm8k"
         echo -e "${CYAN}${BOLD}[✓] Config file : ${BOLD}$CONFIG_PATH\n${NC}"
     fi
 fi
-
 
 if [ -n "${HF_TOKEN}" ]; then
     HUGGINGFACE_ACCESS_TOKEN=${HF_TOKEN}

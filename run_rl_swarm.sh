@@ -821,16 +821,20 @@ fi
 
 if [ -n "${HF_TOKEN}" ]; then
     HUGGINGFACE_ACCESS_TOKEN=${HF_TOKEN}
-else
-    read -p "Would you like to push models you train in the RL swarm to the Hugging Face Hub? [y/N] " yn
-    yn=${yn:-N}
-    case $yn in
-        [Yy]* ) read -p "Enter your Hugging Face access token: " HUGGINGFACE_ACCESS_TOKEN;;
-        [Nn]* ) HUGGINGFACE_ACCESS_TOKEN="None";;
-        * ) echo -e "${YELLOW}>>> No answer was given, so NO models will be pushed to the Hugging Face Hub.${NC}" && HUGGINGFACE_ACCESS_TOKEN="None";;
-    esac
 fi
 
+if [ -n "${HF_TOKEN}" ]; then
+    HUGGINGFACE_ACCESS_TOKEN=${HF_TOKEN}
+else
+    # read -p "Would you like to push models you train in the RL swarm to the Hugging Face Hub? [y/N] " yn
+    # yn=${yn:-N}
+    # case $yn in
+    #     [Yy]* ) read -p "Enter your Hugging Face access token: " HUGGINGFACE_ACCESS_TOKEN;;
+    #     [Nn]* ) HUGGINGFACE_ACCESS_TOKEN="None";;
+    #     * ) echo -e "${YELLOW}>>> No answer was given, so NO models will be pushed to the Hugging Face Hub.${NC}" && HUGGINGFACE_ACCESS_TOKEN="None";;
+    # esac
+    HUGGINGFACE_ACCESS_TOKEN="None"
+fi
 echo -e "\n${GREEN}${BOLD}[✓] Good luck in the swarm! Your training session is about to begin.\n${NC}"
 
 if [ -n "$ORG_ID" ]; then

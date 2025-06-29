@@ -2,17 +2,36 @@
 
 Для стабильной работы нужна CUDA не ниже 12.6
 ```bash
-tmux new-session -d -s gensyn bash -c '\
-apt update && apt install -y python3-dev build-essential curl git && \
-git clone https://github.com/gensyn-ai/rl-swarm /root/rl-swarm && \
-cd /root/rl-swarm && \
-python3 -m venv .venv && source .venv/bin/activate && \
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && \
-export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && \
-nvm install 20.18.0 && nvm use 20.18.0 && \
-sed -i "s/startup_timeout: float = 15/startup_timeout: float = 120/" $(find $VIRTUAL_ENV/lib -type f -name p2p_daemon.py) && \
-./run_rl_swarm.sh'
+tmux new-session -s gensyn
 ```
+```bash
+apt update && apt install -y python3-dev build-essential curl git
+```
+```bash
+git clone https://github.com/noderguru/rl-swarm.git
+cd /root/rl-swarm
+```
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+export NVM_DIR="$HOME/.nvm"
+source "$NVM_DIR/nvm.sh"
+```
+```bash
+nvm install 20.18.0
+nvm use 20.18.0
+```
+```bash
+./run_rl_swarm.sh
+```
+Если не хватает 15 секунд на старт
+```bash
+sed -i "s/startup_timeout: float = 15/startup_timeout: float = 120/" $(find $VIRTUAL_ENV/lib -type f -name p2p_daemon.py)
+```
+
 когда запросит логин
 
 ![image](https://github.com/user-attachments/assets/662fb432-d932-430a-b9df-c281c274c379)

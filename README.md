@@ -48,6 +48,10 @@ lt --port 3000
 ```bash
 lt --port 3000
 ```
+мониторинг загрузки карты в реальном режиме времени
+```bash
+watch -n 1 nvidia-smi
+```
 
 ![image](https://github.com/user-attachments/assets/ffc3a3bc-889f-4635-a5a5-5a3d4ca2202f)
 

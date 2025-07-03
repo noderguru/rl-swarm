@@ -41,9 +41,11 @@ sed -i "s/startup_timeout: float = 15/startup_timeout: float = 120/" $(find $VIR
 npm install -g localtunnel
 lt --port 3000
 ```
-
 выдаст ссылку, переходим по ней и в поле пароль вписываем IP сервака c которого запустили команду. 
-
+посмотреть ip сервака
+```bash
+curl -4 ifconfig.me
+```
 если надо еще раз залогинится
 ```bash
 lt --port 3000

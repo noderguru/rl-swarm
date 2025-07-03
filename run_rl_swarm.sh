@@ -110,7 +110,7 @@ if [[ -f "$API_KEY_FILE" && -f "$USER_DATA_FILE" ]]; then
 
     cd modal-login
 
-    # Ensure Node.js/Yarn exists (можно пропустить если уверен)
+    # Ensure Node.js/Yarn exists
     if ! command -v node > /dev/null 2>&1; then
         echo_red ">> Node.js is missing, cannot start modal-login server."
         exit 1

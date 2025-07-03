@@ -80,7 +80,6 @@ errnotify() {
     echo_red ">> An error was detected while running rl-swarm. See $ROOT/logs for full logs."
 }
 
-trap cleanup EXIT
 trap errnotify ERR
 
 echo -e "\033[38;5;224m"
@@ -103,58 +102,33 @@ if [ "$CONNECT_TO_TESTNET" = true ]; then
     API_KEY_FILE="$LOGIN_PATH/userApiKey.json"
     USER_DATA_FILE="$LOGIN_PATH/userData.json"
 
-    if [[ -f "$API_KEY_FILE" && -f "$USER_DATA_FILE" ]]; then
-        echo_green ">> Login data already exists. Skipping modal login step."
-        ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' "$USER_DATA_FILE")
-        echo "Your ORG_ID is set to: $ORG_ID"
-    else
-        # Run modal_login server.
-        echo "Please login to create an Ethereum Server Wallet"
-        cd modal-login
+if [[ -f "$API_KEY_FILE" && -f "$USER_DATA_FILE" ]]; then
+    echo_green ">> Login data already exists. Skipping login page — but starting modal-login server..."
 
-        # Node.js + NVM setup
-        if ! command -v node > /dev/null 2>&1; then
-            echo "Node.js not found. Installing NVM and latest Node.js..."
-            export NVM_DIR="$HOME/.nvm"
-            if [ ! -d "$NVM_DIR" ]; then
-                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-            fi
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-            [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
-            nvm install node
-        else
-            echo "Node.js is already installed: $(node -v)"
-        fi
+    ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' "$USER_DATA_FILE")
+    echo "Your ORG_ID is set to: $ORG_ID"
 
-        if ! command -v yarn > /dev/null 2>&1; then
-            if grep -qi "ubuntu" /etc/os-release 2> /dev/null || uname -r | grep -qi "microsoft"; then
-                echo "Detected Ubuntu or WSL Ubuntu. Installing Yarn via apt..."
-                curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
-                echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
-                sudo apt update && sudo apt install -y yarn
-            else
-                echo "Yarn not found. Installing Yarn globally with npm (no profile edits)…"
-                npm install -g --silent yarn
-            fi
-        fi
+    cd modal-login
 
-        ENV_FILE="$ROOT/modal-login/.env"
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
-        else
-            sed -i "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
-        fi
+    # Ensure Node.js/Yarn exists (можно пропустить если уверен)
+    if ! command -v node > /dev/null 2>&1; then
+        echo_red ">> Node.js is missing, cannot start modal-login server."
+        exit 1
+    fi
 
-        if [ -z "$DOCKER" ]; then
-            yarn install --immutable
-            echo "Building server"
-            yarn build > "$ROOT/logs/yarn.log" 2>&1
-        fi
-        yarn start >> "$ROOT/logs/yarn.log" 2>&1 &
+    if [ -z "$DOCKER" ]; then
+        yarn install --immutable
+        echo "Building server"
+        yarn build > "$ROOT/logs/yarn.log" 2>&1
+    fi
 
-        SERVER_PID=$!
-        echo "Started server process: $SERVER_PID"
-        sleep 5
+    yarn start >> "$ROOT/logs/yarn.log" 2>&1 &
+
+    SERVER_PID=$!
+    trap cleanup EXIT
+
+    cd ..
+else
 
         if [ -z "$DOCKER" ]; then
             if open http://localhost:3000 2> /dev/null; then

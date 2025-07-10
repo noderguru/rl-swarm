@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+# === 0) Проверяем jq и ставим, если нет ===
+if ! command -v jq &>/dev/null; then
+    echo "jq не найден, ставлю..."
+    apt-get update -qq
+    apt-get install -y jq
+fi
+
+# === 1) Exports & Defaults ===
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export CONNECT_TO_TESTNET=true
 export HF_HUB_DOWNLOAD_TIMEOUT=120
@@ -91,18 +99,17 @@ pip install \
   hivemind@git+https://github.com/gensyn-ai/hivemind@639c964a8019de63135a2594663b5bec8e5356dd \
   &> "$LOG_DIR/python_deps.log"
 
-echo_green ">> Launching rl-swarm (auto-restart on crash)…"
+echo_green ">> Launching rl-swarm (auto-restart on crash or OOM)…"
 while true; do
-    if python -m rgym_exp.runner.swarm_launcher \
-           --config-path "$ROOT/rgym_exp/config" \
-           --config-name "rg-swarm.yaml"; then
-        echo_green ">> rl-swarm finished normally, exit."
-        break
-    else
-        CODE=$?
-        echo_red ">> rl-swarm crashed (exit $CODE). Restarting in 5s…"
-        sleep 5
-    fi
+  if python -m rgym_exp.runner.swarm_launcher \
+       --config-path "$ROOT/rgym_exp/config" \
+       --config-name "rg-swarm.yaml"; then
+    echo_green ">> rl-swarm finished normally."
+  else
+    CODE=$?
+    echo_red ">> rl-swarm exited with code $CODE (maybe OOM). Restarting in 5s…"
+  fi
+  sleep 5
 done
 
 cleanup

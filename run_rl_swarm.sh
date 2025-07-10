@@ -83,13 +83,19 @@ else
 fi
 
 echo_green ">> Installing Python requirements…"
-pip install --upgrade pip &>/dev/null
+
+# Show pip upgrade logs
+echo "-> pip install --upgrade pip"
+pip install --upgrade pip 2>&1 | tee -a "$LOG_DIR/python_deps.log"
+
+# Show libs installation logs
+echo "-> pip install gensyn-genrl reasoning-gym trl hivemind…"
 pip install \
   gensyn-genrl==0.1.4 \
   reasoning-gym>=0.1.20 \
   trl \
   hivemind@git+https://github.com/gensyn-ai/hivemind@639c964a8019de63135a2594663b5bec8e5356dd \
-  &> "$LOG_DIR/python_deps.log"
+  2>&1 | tee -a "$LOG_DIR/python_deps.log"
 
 echo_green ">> Launching rl-swarm (auto-restart on crash or OOM)…"
 while true; do

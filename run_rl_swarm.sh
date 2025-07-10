@@ -1,14 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# === 0) Проверяем jq и ставим, если нет ===
-if ! command -v jq &>/dev/null; then
-    echo "jq не найден, ставлю..."
-    apt-get update -qq
-    apt-get install -y jq
-fi
-
-# === 1) Exports & Defaults ===
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export CONNECT_TO_TESTNET=true
 export HF_HUB_DOWNLOAD_TIMEOUT=120

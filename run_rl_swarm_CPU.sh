@@ -76,7 +76,6 @@ echo_green "-> Updating SMART_CONTRACT_ADDRESS in .env"
 sed -i "3s/.*/SMART_CONTRACT_ADDRESS=${SWARM_CONTRACT}/" .env
 
 echo_green "-> Installing modal-login dependencies"
-# Allow failures during install so script doesn't exit on non-zero
 set +e
 yarn install --immutable 2>&1 | tee "$LOG_DIR/yarn_install.log"
 INSTALL_STATUS=${PIPESTATUS[0]}
@@ -148,11 +147,14 @@ pip install \
 
 echo_green ">> Launching rl-swarm (auto-restart on crash or OOM)…"
 while true; do
-  python -m rgym_exp.runner.swarm_launcher \
+  if python -m rgym_exp.runner.swarm_launcher \
        --config-path "$ROOT/rgym_exp/config" \
-       --config-name "rg-swarm.yaml"
-  CODE=$?
-  echo_red ">> rl-swarm exited with code $CODE. Restarting in 5s…"
+       --config-name "rg-swarm.yaml"; then
+    echo_green ">> rl-swarm finished normally."
+  else
+    CODE=$?
+    echo_red ">> rl-swarm exited with code $CODE. Restarting in 5s…"
+  fi
   sleep 5
 done
 

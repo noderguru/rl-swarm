@@ -1,274 +1,268 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
 
-# General arguments
-ROOT=$PWD
+# === Paths & Defaults ===
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_DIR="$ROOT/logs"
+ML_DIR="$ROOT/modal-login"
+ML_TEMP="$ML_DIR/temp-data"
 
-# GenRL Swarm version to use
-GENRL_TAG="0.1.6"
-
-export IDENTITY_PATH
-export GENSYN_RESET_CONFIG
+# === Env (без интерактива) ===
 export CONNECT_TO_TESTNET=true
-export ORG_ID
-export HF_HUB_DOWNLOAD_TIMEOUT=120  # 2 minutes
-export SWARM_CONTRACT="0xFaD7C5e93f28257429569B854151A1B8DCD404c2"
-export PRG_CONTRACT="0x51D4db531ae706a6eC732458825465058fA23a35"
+export HF_HUB_DOWNLOAD_TIMEOUT=120
 export HUGGINGFACE_ACCESS_TOKEN="None"
+export GENSYN_RESET_CONFIG="${GENSYN_RESET_CONFIG:-}"
+export CPU_ONLY="${CPU_ONLY:-}"
+export SWARM_CONTRACT="${SWARM_CONTRACT:-0xFaD7C5e93f28257429569B854151A1B8DCD404c2}"
+export PRG_CONTRACT="${PRG_CONTRACT:-0x51D4db531ae706a6eC732458825465058fA23a35}"
 export PRG_GAME=true
+GENRL_TAG="${GENRL_TAG:-0.1.6}"
 
-# Path to an RSA private key. If this path does not exist, a new key pair will be created.
-# Remove this file if you want a new PeerID.
-DEFAULT_IDENTITY_PATH="$ROOT"/swarm.pem
-IDENTITY_PATH=${IDENTITY_PATH:-$DEFAULT_IDENTITY_PATH}
+# === API-key activation check (новое) ===
+REQUIRE_API_KEY_ACTIVATION="${REQUIRE_API_KEY_ACTIVATION:-1}"   # 1=ждать активацию, 0=пропустить
+API_KEY_WAIT_SECONDS="${API_KEY_WAIT_SECONDS:-300}"              # общий таймаут ожидания, сек
 
-DOCKER=${DOCKER:-""}
-GENSYN_RESET_CONFIG=${GENSYN_RESET_CONFIG:-""}
+DEFAULT_IDENTITY_PATH="$ROOT/swarm.pem"
+export IDENTITY_PATH="${IDENTITY_PATH:-$DEFAULT_IDENTITY_PATH}"
 
-# Bit of a workaround for the non-root docker container.
-if [ -n "$DOCKER" ]; then
-    volumes=(
-        /home/gensyn/rl_swarm/modal-login/temp-data
-        /home/gensyn/rl_swarm/keys
-        /home/gensyn/rl_swarm/configs
-        /home/gensyn/rl_swarm/logs
-    )
+# === Colors & echo ===
+GREEN="\033[32m"; BLUE="\033[34m"; RED="\033[31m"; YELLOW="\033[33m"; RESET="\033[0m"
+echo_green(){ echo -e "${GREEN}$1${RESET}"; }
+echo_blue (){ echo -e "${BLUE}$1${RESET}"; }
+echo_red  (){ echo -e "${RED}$1${RESET}"; }
+echo_yel  (){ echo -e "${YELLOW}$1${RESET}"; }
 
-    for volume in ${volumes[@]}; do
-        sudo chown -R 1001:1001 $volume
-    done
-fi
+mkdir -p "$LOG_DIR"
 
-# Will ignore any visible GPUs if set.
-CPU_ONLY=${CPU_ONLY:-""}
-
-# Set if successfully parsed from modal-login/temp-data/userData.json.
-ORG_ID=${ORG_ID:-""}
-
-GREEN_TEXT="\033[32m"
-BLUE_TEXT="\033[34m"
-RED_TEXT="\033[31m"
-RESET_TEXT="\033[0m"
-
-echo_green() {
-    echo -e "$GREEN_TEXT$1$RESET_TEXT"
-}
-
-echo_blue() {
-    echo -e "$BLUE_TEXT$1$RESET_TEXT"
-}
-
-echo_red() {
-    echo -e "$RED_TEXT$1$RESET_TEXT"
-}
-
-ROOT_DIR="$(cd $(dirname ${BASH_SOURCE[0]}) && pwd)"
-
-# Function to clean up the server process upon exit
 cleanup() {
-    echo_green ">> Shutting down trainer..."
+  echo_green ">> Stopping background processes…"
+  [[ -n "${ML_PID:-}" ]] && kill "$ML_PID" &>/dev/null || true
+  [[ -n "${LT_PID:-}" ]] && kill "$LT_PID" &>/dev/null || true
+}
+trap cleanup EXIT SIGINT SIGTERM
 
-    # Remove modal credentials if they exist
-    rm -r $ROOT_DIR/modal-login/temp-data/*.json 2> /dev/null || true
-
-    # Kill all processes belonging to this script's process group
-    kill -- -$$ || true
-
-    exit 0
+# === Tools check ===
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || return 1
+}
+ensure_pkg() {
+  if ! need_cmd "$1"; then
+    echo_yel ">> Installing $1…"
+    apt-get update -y >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "$1"
+  fi
 }
 
-errnotify() {
-    echo_red ">> An error was detected while running rl-swarm. See $ROOT/logs for full logs."
+ensure_pkg jq
+ensure_pkg curl
+
+# === Start modal-login server ===
+start_modal_login() {
+  echo_green ">> Starting modal-login server…"
+  cd "$ML_DIR"
+
+  # Node & Yarn
+  if ! need_cmd node; then
+    echo_yel "Node.js not found → install NVM + Node.js"
+    export NVM_DIR="$HOME/.nvm"
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+    # shellcheck disable=SC1090
+    . "$NVM_DIR/nvm.sh"
+    nvm install node
+  else
+    echo_green "Node.js: $(node -v)"
+  fi
+
+  if ! need_cmd yarn; then
+    echo_yel "Yarn not found → npm i -g yarn"
+    npm install -g yarn >/dev/null 2>&1
+  fi
+
+  ENV_FILE="$ML_DIR/.env"
+  if [[ -f "$ENV_FILE" ]]; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      sed -i '' "3s/.*/SWARM_CONTRACT_ADDRESS=${SWARM_CONTRACT}/" "$ENV_FILE"
+      sed -i '' "4s/.*/PRG_CONTRACT_ADDRESS=${PRG_CONTRACT}/" "$ENV_FILE"
+    else
+      sed -i "3s/.*/SWARM_CONTRACT_ADDRESS=${SWARM_CONTRACT}/" "$ENV_FILE"
+      sed -i "4s/.*/PRG_CONTRACT_ADDRESS=${PRG_CONTRACT}/" "$ENV_FILE"
+    fi
+  fi
+
+  yarn install --immutable        &> "$LOG_DIR/yarn_install.log"
+  echo_green ">> Building modal-login…"
+  yarn build                      &> "$LOG_DIR/yarn_build.log"
+  echo_green ">> Running modal-login…"
+  yarn start                      &> "$LOG_DIR/yarn_start.log" &
+  ML_PID=$!
+  echo_green ">> modal-login PID: $ML_PID"
+  cd "$ROOT"
 }
 
-trap cleanup EXIT
-trap errnotify ERR
+# === Localtunnel until JSON appear ===
+ensure_modal_json() {
+  if [[ -f "$ML_TEMP/userData.json" && -f "$ML_TEMP/userApiKey.json" ]]; then
+    echo_green ">> JSON already present — skipping login."
+    return 0
+  fi
 
+  echo_green ">> Start localtunnel for login…"
+  npm install -g localtunnel >/dev/null 2>&1 || true
+  lt --port 3000 > "$LOG_DIR/lt.log" 2>&1 &
+  LT_PID=$!
+  sleep 3
+
+  TUNNEL_URL="$(grep -Eo 'https://[^ ]+' "$LOG_DIR/lt.log" | head -n1 || true)"
+  IP="$(curl -4 -s ifconfig.me || echo 'your-IP')"
+
+  echo_blue  "   Open in browser: ${TUNNEL_URL:-<wait 3-10s and recheck lt.log>}"
+  echo_blue  "   Password = your IP: $IP"
+  echo_green "   Waiting for JSON files to appear…"
+
+  while [[ ! -f "$ML_TEMP/userData.json" || ! -f "$ML_TEMP/userApiKey.json" ]]; do
+    sleep 5
+  done
+
+  echo_green ">> JSON files created."
+  kill "$LT_PID" 2>/dev/null || true
+}
+
+# === Parse ORG_ID from userData.json (robust jq) ===
+extract_org_id() {
+  local f="$ML_TEMP/userData.json"
+  if [[ ! -f "$f" ]]; then
+    echo_red ">> userData.json not found."
+    return 1
+  fi
+
+  ORG_ID="$(jq -r '
+    if type=="string" then .
+    elif has("orgId") then .orgId
+    elif (.data? and .data.orgId) then .data.orgId
+    else to_entries[0].value.orgId
+    end
+  ' "$f" 2>/dev/null || echo "")"
+
+  if [[ -z "$ORG_ID" || "$ORG_ID" == "null" ]]; then
+    echo_red ">> WARNING: Failed to extract ORG_ID (Modal-Login may misbehave on peer registration)."
+  else
+    export ORG_ID
+    echo_green ">> ORG_ID = $ORG_ID"
+  fi
+}
+
+# === Optional: wait for API key activation ===
+wait_api_key_activation() {
+  if [[ "${REQUIRE_API_KEY_ACTIVATION}" != "1" ]]; then
+    echo_yel ">> API-key activation check skipped (REQUIRE_API_KEY_ACTIVATION=0)."
+    return 0
+  fi
+
+  if [[ -z "${ORG_ID:-}" || "$ORG_ID" == "null" ]]; then
+    echo_yel ">> API-key activation check skipped (ORG_ID empty)."
+    return 0
+  fi
+
+  echo_green ">> Waiting for API key activation (timeout ${API_KEY_WAIT_SECONDS}s)…"
+  local deadline=$(( $(date +%s) + API_KEY_WAIT_SECONDS ))
+  while true; do
+    local raw
+    raw="$(curl -fsS --max-time 5 \
+            --get "http://127.0.0.1:3000/api/get-api-key-status" \
+            --data-urlencode "orgId=${ORG_ID}" 2>/dev/null || true)"
+
+    local st=""
+    if [[ "$raw" == "activated" ]]; then
+      st="activated"
+    else
+      st="$(jq -r '(.status // .state // empty)' <<<"$raw" 2>/dev/null || echo "")"
+    fi
+
+    if [[ "$st" == "activated" ]]; then
+      echo_green ">> API key is activated! Proceeding…"
+      break
+    fi
+
+    if (( $(date +%s) >= deadline )); then
+      echo_yel ">> Activation wait timed out — proceeding anyway."
+      break
+    fi
+
+    echo_blue ">> Waiting for API key to be activated…"
+    sleep 5
+  done
+}
+
+# === Python deps ===
+install_python_reqs() {
+  echo_green ">> Installing Python requirements…"
+  if need_cmd python3; then
+    PY=python3
+  else
+    PY=python
+  fi
+  $PY -m pip install --upgrade pip        2>&1 | tee -a "$LOG_DIR/python_deps.log"
+  $PY -m pip install \
+    "gensyn-genrl==${GENRL_TAG}" \
+    "reasoning-gym>=0.1.20" \
+    "git+https://github.com/gensyn-ai/hivemind@639c964a8019de63135a2594663b5bec8e5356dd" \
+    2>&1 | tee -a "$LOG_DIR/python_deps.log"
+}
+
+# === Config sync ===
+sync_config() {
+  mkdir -p "$ROOT/configs"
+  local SRC="$ROOT/rgym_exp/config/rg-swarm.yaml"
+  local DST="$ROOT/configs/rg-swarm.yaml"
+  if [[ -f "$DST" ]]; then
+    if ! cmp -s "$SRC" "$DST"; then
+      if [[ -n "$GENSYN_RESET_CONFIG" ]]; then
+        mv "$DST" "$DST.bak.$(date +%s)" || true
+        cp "$SRC" "$DST"
+        echo_green ">> Config reset to default (backup saved)."
+      else
+        echo_yel ">> Config differs. Keep existing (set GENSYN_RESET_CONFIG to overwrite)."
+      fi
+    fi
+  else
+    cp "$SRC" "$DST"
+    echo_green ">> Config created: configs/rg-swarm.yaml"
+  fi
+}
+
+# === Main ===
 echo -e "\033[38;5;224m"
-cat << "EOF"
+cat <<'ASCII'
     ██████  ██            ███████ ██     ██  █████  ██████  ███    ███
     ██   ██ ██            ██      ██     ██ ██   ██ ██   ██ ████  ████
     ██████  ██      █████ ███████ ██  █  ██ ███████ ██████  ██ ████ ██
     ██   ██ ██                 ██ ██ ███ ██ ██   ██ ██   ██ ██  ██  ██
     ██   ██ ███████       ███████  ███ ███  ██   ██ ██   ██ ██      ██
+ASCII
+echo -en "${RESET}"
 
-    From Gensyn
+echo_green ">> participate in the AI Prediction Market: true"
+echo_green ">> Playing PRG game: true"
 
-EOF
+start_modal_login
+ensure_modal_json
+extract_org_id
+wait_api_key_activation
+install_python_reqs
+sync_config
 
-# Create logs directory if it doesn't exist
-mkdir -p "$ROOT/logs"
+echo_green ">> Launching rl-swarm with auto-restart on crash/OOM…"
+echo_blue  ">> Using default model from config (no prompt)."
+echo_blue  ">> HF token disabled (HUGGINGFACE_ACCESS_TOKEN=None)."
 
-if [ "$CONNECT_TO_TESTNET" = true ]; then
-    # Run modal_login server.
-    echo "Please login to create an Ethereum Server Wallet"
-    cd modal-login
-    # Check if the yarn command exists; if not, install Yarn.
-
-    # Node.js + NVM setup
-    if ! command -v node > /dev/null 2>&1; then
-        echo "Node.js not found. Installing NVM and latest Node.js..."
-        export NVM_DIR="$HOME/.nvm"
-        if [ ! -d "$NVM_DIR" ]; then
-            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-        fi
-        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
-        nvm install node
-    else
-        echo "Node.js is already installed: $(node -v)"
-    fi
-
-    if ! command -v yarn > /dev/null 2>&1; then
-        # Detect Ubuntu (including WSL Ubuntu) and install Yarn accordingly
-        if grep -qi "ubuntu" /etc/os-release 2> /dev/null || uname -r | grep -qi "microsoft"; then
-            echo "Detected Ubuntu or WSL Ubuntu. Installing Yarn via apt..."
-            curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
-            echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
-            sudo apt update && sudo apt install -y yarn
-        else
-            echo "Yarn not found. Installing Yarn globally with npm (no profile edits)…"
-            # This lands in $NVM_DIR/versions/node/<ver>/bin which is already on PATH
-            npm install -g --silent yarn
-        fi
-    fi
-
-    ENV_FILE="$ROOT"/modal-login/.env
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS version
-        sed -i '' "3s/.*/SWARM_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
-        sed -i '' "4s/.*/PRG_CONTRACT_ADDRESS=$PRG_CONTRACT/" "$ENV_FILE"
-
-    else
-        # Linux version
-        sed -i "3s/.*/SWARM_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
-        sed -i "4s/.*/PRG_CONTRACT_ADDRESS=$PRG_CONTRACT/" "$ENV_FILE"
-    fi
-
-
-    # Docker image already builds it, no need to again.
-    if [ -z "$DOCKER" ]; then
-        yarn install --immutable
-        echo "Building server"
-        yarn build > "$ROOT/logs/yarn.log" 2>&1
-    fi
-    yarn start >> "$ROOT/logs/yarn.log" 2>&1 & # Run in background and log output
-
-    SERVER_PID=$!  # Store the process ID
-    echo "Started server process: $SERVER_PID"
-    sleep 5
-
-    # Try to open the URL in the default browser
-    if [ -z "$DOCKER" ]; then
-        if open http://localhost:3000 2> /dev/null; then
-            echo_green ">> Successfully opened http://localhost:3000 in your default browser."
-        else
-            echo ">> Failed to open http://localhost:3000. Please open it manually."
-        fi
-    else
-        echo_green ">> Please open http://localhost:3000 in your host browser."
-    fi
-
-    cd ..
-
-    echo_green ">> Waiting for modal userData.json to be created..."
-    while [ ! -f "modal-login/temp-data/userData.json" ]; do
-        sleep 5  # Wait for 5 seconds before checking again
-    done
-    echo "Found userData.json. Proceeding..."
-
-    ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
-    echo "Your ORG_ID is set to: $ORG_ID"
-
-    # Wait until the API key is activated by the client
-    echo "Waiting for API key to become activated..."
-    while true; do
-        STATUS=$(curl -s "http://localhost:3000/api/get-api-key-status?orgId=$ORG_ID")
-        if [[ "$STATUS" == "activated" ]]; then
-            echo "API key is activated! Proceeding..."
-            break
-        else
-            echo "Waiting for API key to be activated..."
-            sleep 5
-        fi
-    done
-fi
-
-echo_green ">> Getting requirements..."
-pip install --upgrade pip
-
- echo_green ">> Installing GenRL..."
-pip install gensyn-genrl==${GENRL_TAG}
-pip install reasoning-gym>=0.1.20 # for reasoning gym env
-pip install hivemind@git+https://github.com/gensyn-ai/hivemind@639c964a8019de63135a2594663b5bec8e5356dd # We need the latest, 1.1.11 is broken
-
-
-if [ ! -d "$ROOT/configs" ]; then
-    mkdir "$ROOT/configs"
-fi  
-if [ -f "$ROOT/configs/rg-swarm.yaml" ]; then
-    # Use cmp -s for a silent comparison. If different, backup and copy.
-    if ! cmp -s "$ROOT/rgym_exp/config/rg-swarm.yaml" "$ROOT/configs/rg-swarm.yaml"; then
-        if [ -z "$GENSYN_RESET_CONFIG" ]; then
-            echo_green ">> Found differences in rg-swarm.yaml. If you would like to reset to the default, set GENSYN_RESET_CONFIG to a non-empty value."
-        else
-            echo_green ">> Found differences in rg-swarm.yaml. Backing up existing config."
-            mv "$ROOT/configs/rg-swarm.yaml" "$ROOT/configs/rg-swarm.yaml.bak"
-            cp "$ROOT/rgym_exp/config/rg-swarm.yaml" "$ROOT/configs/rg-swarm.yaml"
-        fi
-    fi
-else
-    # If the config doesn't exist, just copy it.
-    cp "$ROOT/rgym_exp/config/rg-swarm.yaml" "$ROOT/configs/rg-swarm.yaml"
-fi
-
-if [ -n "$DOCKER" ]; then
-    # Make it easier to edit the configs on Linux systems.
-    sudo chmod -R 0777 /home/gensyn/rl_swarm/configs
-fi
-
-echo_green ">> Done!"
-
-
-echo -en $GREEN_TEXT
-read -p ">> Would you like to push models you train in the RL swarm to the Hugging Face Hub? [y/N] " yn
-echo -en $RESET_TEXT
-yn=${yn:-N} # Default to "N" if the user presses Enter
-case $yn in
-    [Yy]*) read -p "Enter your Hugging Face access token: " HUGGINGFACE_ACCESS_TOKEN ;;
-    [Nn]*) HUGGINGFACE_ACCESS_TOKEN="None" ;;
-    *) echo ">>> No answer was given, so NO models will be pushed to Hugging Face Hub" && HUGGINGFACE_ACCESS_TOKEN="None" ;;
-esac
-
-
-echo -en $GREEN_TEXT
-read -p ">> Enter the name of the model you want to use in huggingface repo/name format, or press [Enter] to use the default model. " MODEL_NAME
-echo -en $RESET_TEXT
-
-# Only export MODEL_NAME if user provided a non-empty value
-if [ -n "$MODEL_NAME" ]; then
-    export MODEL_NAME
-    echo_green ">> Using model: $MODEL_NAME"
-else
-    echo_green ">> Using default model from config"
-fi
-
-echo -en $GREEN_TEXT
-read -p ">> Would you like your model to participate in the AI Prediction Market? [Y/n] " yn
-if [ "$yn" = "n" ] || [ "$yn" = "N" ]; then
-    PRG_GAME=false
-    echo_green ">> Playing PRG game: false"
-else
-    echo_green ">> Playing PRG game: true"
-fi
-
-echo -en $RESET_TEXT
-echo_green ">> Good luck in the swarm!"
-echo_blue ">> And remember to star the repo on GitHub! --> https://github.com/gensyn-ai/rl-swarm"
-
-python -m rgym_exp.runner.swarm_launcher \
-    --config-path "$ROOT/rgym_exp/config" \
-    --config-name "rg-swarm.yaml" 
-
-wait  # Keep script running until Ctrl+C
+while true; do
+  if python -m rgym_exp.runner.swarm_launcher \
+       --config-path "$ROOT/rgym_exp/config" \
+       --config-name "rg-swarm.yaml"; then
+    echo_green ">> rl-swarm finished normally."
+  else
+    CODE=$?
+    echo_red ">> rl-swarm exited code $CODE. Restarting in 5s…"
+  fi
+  sleep 5
+done

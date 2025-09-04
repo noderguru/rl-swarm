@@ -36,4 +36,17 @@ source .venv/bin/activate
 ```bash
 watch -n 1 nvidia-smi
 ```
+======================================================================
+
+Для слабеньких видео
+```bash
+FILE="/root/rl-swarm/rgym_exp/config/rg-swarm.yaml"; \
+sed -i '17s/^[[:space:]]*\(num_generations:\).*/\1 2/;18s/^[[:space:]]*\(num_transplant_trees:\).*/\1 1/;20s/^[[:space:]]*\(dtype:\).*/\1 '\''bfloat16'\''/;85s/^[[:space:]]*\(num_train_samples:\).*/\1 1/;96s/^[[:space:]]*\(beam_size:\).*/\1 20/' "$FILE" \
+&& (grep -q '^[[:space:]]*enable_gradient_checkpointing:' "$FILE" || sed -i '21i enable_gradient_checkpointing: true' "$FILE") \
+&& (grep -q 'PYTORCH_CUDA_ALLOC_CONF' /root/rl-swarm/run_rl_swarm-exp.sh || sed -i '1a export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"' /root/rl-swarm/run_rl_swarm-exp.sh)
+```
+```bash
+bash run_rl_swarm-exp.sh
+```
+
 

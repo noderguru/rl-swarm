@@ -18,6 +18,9 @@ tmux attach -t gensyn
 deactivate
 ```
 ```bash
+rm -rf /root/.cache
+```
+```bash
 rm -rf .venv && git pull && python3 -m venv .venv && source .venv/bin/activate
 ```
 

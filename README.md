@@ -52,6 +52,19 @@ source .venv/bin/activate
 watch -n 1 nvidia-smi
 ```
 ======================================================================
+## Для слабых видиков и CPU можно попробовать так (не тестировал)
+```bash
+cd /root/rl-swarm && \
+FILE="code_gen_exp/config/code-gen-swarm.yaml" && \
+sed -i -e 's/^\([[:space:]]*\)num_transplant_trees:.*/\1num_transplant_trees: 1/' -e "s/^\([[:space:]]*\)dtype: 'float32'/\1dtype: 'bfloat16'/" -e 's/^\([[:space:]]*\)batch_size:.*/\1batch_size: 1/' -e 's/^\([[:space:]]*\)train_batch_size:.*/\1train_batch_size: 1/' -e 's/^\([[:space:]]*\)beam_size:.*/\1beam_size: 5/' "$FILE" && \
+grep -q 'PYTORCH_CUDA_ALLOC_CONF' ~/.bashrc || echo 'export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"' >> ~/.bashrc && \
+source ~/.bashrc && \
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128" && \
+./run_rl_swarm.sh
+
+```
+
+
 
 
 

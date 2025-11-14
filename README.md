@@ -53,20 +53,5 @@ watch -n 1 nvidia-smi
 ```
 ======================================================================
 
-Для слабеньких видео
-```bash
-FILE="/root/rl-swarm/rgym_exp/config/rg-swarm.yaml"; \
-sed -i -e '17s/^[[:space:]]*num_generations:.*/  num_generations: 2/' \
-       -e '18s/^[[:space:]]*num_transplant_trees:.*/  num_transplant_trees: 1/' \
-       -e '20s/^[[:space:]]*dtype:.*/  dtype: '\''bfloat16'\''/' \
-       -e '85s/^[[:space:]]*num_train_samples:.*/    num_train_samples: 1/' \
-       -e '96s/^[[:space:]]*beam_size:.*/    beam_size: 20/' "$FILE"; \
-grep -q 'enable_gradient_checkpointing' "$FILE" || sed -i '21i \  enable_gradient_checkpointing: true' "$FILE"; \
-grep -q 'PYTORCH_CUDA_ALLOC_CONF' /root/rl-swarm/run_rl_swarm-exp.sh || \
-sed -i '1a export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,max_split_size_mb:128"' /root/rl-swarm/run_rl_swarm-exp.sh
-```
-```bash
-bash run_rl_swarm-exp.sh
-```
 
 
